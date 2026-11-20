@@ -1,0 +1,7 @@
+{
+  "string": [
+    { "name": "app_name", "value": "ABandOn" },
+    { "name": "entry_desc", "value": "Guitar Pro score reader" },
+    { "name": "microphone_reason", "value": "用于录制吉他演奏" }
+  ]
+}

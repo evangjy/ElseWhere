@@ -586,6 +586,15 @@ final class EditView: NSTextView {
     var k = 1; while k < m.items.count { if m.items[k].isSeparatorItem && m.items[k - 1].isSeparatorItem { m.removeItem(at: k) } else { k += 1 } }
     return m
   }
+  func overChatBtn(_ e: NSEvent) -> Bool {
+    guard let b = doc?.chatBtn, !b.isHidden else { return false }
+    return b.bounds.contains(b.convert(e.locationInWindow, from: nil))
+  }
+  override func cursorUpdate(with e: NSEvent) { if overChatBtn(e) { NSCursor.pointingHand.set() } else { super.cursorUpdate(with: e) } }
+  override func resetCursorRects() {
+    super.resetCursorRects()
+    if let b = doc?.chatBtn, !b.isHidden { addCursorRect(convert(b.bounds, from: b).intersection(visibleRect), cursor: .pointingHand) }
+  }
   // 右键只弹菜单,不改动选区(默认行为会在空白处选中光标所在行及其后的内容)
   override func rightMouseDown(with e: NSEvent) { if let m = menu(for: e) { NSMenu.popUpContextMenu(m, with: e, for: self) } }
   override func mouseDown(with e: NSEvent) { if e.modifierFlags.contains(.control) { rightMouseDown(with: e) } else { super.mouseDown(with: e) } }
@@ -708,7 +717,20 @@ func loadAttach(_ u: URL) -> Attach? {   // 文件 / 图片 / PDF / 文件夹 �
 // 圆形 AI 按钮 · 原创标识「观」:杏仁形的眼 = 洞察与智慧;瞳孔处的四角星 = 一闪而过的灵感;
 // 倾斜的轨道环与光点 = 科幻 / 计算。眼宽取黄金分割 0.618,色彩只留一处暖色(星),其余是深海蓝与白。
 final class RoundButton: NSButton {
+  var hover = false { didSet { needsDisplay = true } }
+  override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+  override func updateTrackingAreas() {   // 鼠标移上来:光标变成小手,按钮外圈亮起,提示「可点击」
+    super.updateTrackingAreas(); for a in trackingAreas { removeTrackingArea(a) }
+    addTrackingArea(NSTrackingArea(rect: bounds, options: [.cursorUpdate, .mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
+  }
+  override func cursorUpdate(with e: NSEvent) { NSCursor.pointingHand.set() }
+  override func mouseEntered(with e: NSEvent) { hover = true }
+  override func mouseExited(with e: NSEvent) { hover = false }
   override func draw(_ dirtyRect: NSRect) {
+    if hover {
+      let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.8, dy: 0.8)); ring.lineWidth = 1.6
+      NSColor(calibratedRed: 0.35, green: 0.82, blue: 0.72, alpha: 0.85).setStroke(); ring.stroke()
+    }
     let b = bounds.insetBy(dx: 1.5, dy: 1.5), m = NSPoint(x: bounds.midX, y: bounds.midY), r = b.width / 2, w = NSColor.white
     NSGradient(starting: NSColor(calibratedRed: 0.09, green: 0.24, blue: 0.34, alpha: 1), ending: NSColor(calibratedRed: 0.02, green: 0.07, blue: 0.13, alpha: 1))!
       .draw(in: NSBezierPath(ovalIn: b), angle: -90)
@@ -1256,8 +1278,9 @@ final class SideToggle: NSButton {   // 底栏最左的「显示 / 隐藏侧边�
   var hover = false { didSet { needsDisplay = true } }
   override func updateTrackingAreas() {
     super.updateTrackingAreas(); for a in trackingAreas { removeTrackingArea(a) }
-    addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
+    addTrackingArea(NSTrackingArea(rect: bounds, options: [.cursorUpdate, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
   }
+  override func cursorUpdate(with e: NSEvent) { NSCursor.pointingHand.set() }
   override func mouseEntered(with e: NSEvent) { hover = true }
   override func mouseExited(with e: NSEvent) { hover = false }
   override func draw(_ dirtyRect: NSRect) {
@@ -1454,8 +1477,16 @@ var pendingFolder: URL?   // 启动时(还没有窗口)收到的文件夹
 var readingMode = false   // 全局阅读模式:⌘. 一次切换所有 Markdown 标签页
 func cur() -> Doc? { docs.first { $0.win == NSApp.mainWindow } ?? docs.last }
 
+final class DocWindow: NSWindow {
+  var handViews: [NSView] = []   // 鼠标在这些视图范围内时显示小手
+  override func sendEvent(_ e: NSEvent) {
+    super.sendEvent(e)
+    guard e.type == .mouseMoved || e.type == .mouseEntered || e.type == .cursorUpdate, attachedSheet == nil else { return }
+    for v in handViews where !v.isHidden && v.window === self && v.bounds.contains(v.convert(e.locationInWindow, from: nil)) { NSCursor.pointingHand.set(); break }
+  }
+}
 final class Doc: NSObject, NSWindowDelegate, NSTextViewDelegate, WKNavigationDelegate {
-  let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 680), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+  let win = DocWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 680), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
   let scroll = makeScroll()
   let status = NSTextField(labelWithString: "")
   let split = NSSplitView(), area = NSView(), side = Sidebar()
@@ -1492,7 +1523,7 @@ final class Doc: NSObject, NSWindowDelegate, NSTextViewDelegate, WKNavigationDel
     split.addArrangedSubview(side.view); split.addArrangedSubview(area); side.view.isHidden = true; chatHost.isHidden = true
     split.setHoldingPriority(NSLayoutConstraint.Priority(260), forSubviewAt: 0)
     chatBtn.title = ""; chatBtn.isBordered = false; chatBtn.target = self; chatBtn.action = #selector(toggleChat); chatBtn.toolTip = T("AI 协作")
-    sideBtn.title = ""; sideBtn.isBordered = false; sideBtn.target = self; sideBtn.action = #selector(toggleSide); sideBtn.toolTip = T("显示/隐藏侧边栏")
+    sideBtn.title = ""; sideBtn.isBordered = false; sideBtn.target = self; sideBtn.action = #selector(toggleSide); sideBtn.toolTip = T("显示/隐藏侧边栏"); win.acceptsMouseMovedEvents = true; win.handViews = [chatBtn, sideBtn]
     trailFull = split.trailingAnchor.constraint(equalTo: root.trailingAnchor); trailChat = split.trailingAnchor.constraint(equalTo: chatHost.leadingAnchor); chatW = chatHost.widthAnchor.constraint(equalToConstant: 300)
     for v in [split, status, encPop, chatBtn, chatHost, sideBtn] { v.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(v) }
     NSLayoutConstraint.activate([
