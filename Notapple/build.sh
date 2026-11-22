@@ -4,9 +4,17 @@ set -e; cd "$(dirname "$0")"
 A=Notapple.app; rm -rf $A; mkdir -p $A/Contents/MacOS $A/Contents/Resources
 for L in en zh-Hans; do mkdir -p $A/Contents/Resources/$L.lproj; echo '"CFBundleName" = "Notapple";' > $A/Contents/Resources/$L.lproj/InfoPlist.strings; done
 swiftc -O -o $A/Contents/MacOS/Notapple main.swift -framework Cocoa -framework PDFKit -framework WebKit
-# 用程序自身绘制图标 -> iconset -> icns(Finder/Dock/Launchpad 均使用它)
+# 图标:优先使用同目录下的 icon.png(1024×1024、透明背景);没有就用程序自己绘制的默认图标
 I="$(mktemp -d)/AppIcon.iconset"
-$A/Contents/MacOS/Notapple --make-icon "$I"
+if [ -f icon.png ]; then
+  mkdir -p "$I"
+  for s in 16 32 128 256 512; do
+    sips -z $s $s icon.png --out "$I/icon_${s}x${s}.png" >/dev/null
+    sips -z $((s*2)) $((s*2)) icon.png --out "$I/icon_${s}x${s}@2x.png" >/dev/null
+  done
+else
+  $A/Contents/MacOS/Notapple --make-icon "$I"
+fi
 iconutil -c icns "$I" -o $A/Contents/Resources/AppIcon.icns
 # 吉他谱(.gp .gpx .gp5)渲染组件:alphaTab(MPL-2.0)+ Bravura 字体(SIL OFL),构建时从 npm 下载;失败则跳过,其余功能不受影响
 AT=1.8.4; R=$A/Contents/Resources/alphatab; W=$(mktemp -d)
